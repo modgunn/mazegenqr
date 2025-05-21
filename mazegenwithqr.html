@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <title>Labirent Oluşturucu</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
+      text-align: center;
+      padding: 20px;
+    }
+    canvas {
+      border: 2px solid #333;
+      background-color: white;
+      margin-top: 20px;
+    }
+    label, select, input, button {
+      margin: 8px;
+      font-size: 1rem;
+    }
+    #qr {
+      position: absolute;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Labirent Oluşturucu ve Çözücü</h1>
+  <label>Genişlik: <input type="number" id="width" min="5" max="100" value="20"></label>
+  <label>Yükseklik: <input type="number" id="height" min="5" max="100" value="20"></label>
+  <label>Zorluk:
+    <select id="difficulty">
+      <option value="easy">Kolay</option>
+      <option value="medium" selected>Orta</option>
+      <option value="hard">Zor</option>
+    </select>
+  </label><br>
+  <label>Duvar Kalınlığı (px): <input type="number" id="wallThickness" min="1" max="20" value="2"></label>
+  <label>Çizgi Birleşimi:
+    <select id="lineJoin">
+      <option value="round" selected>Yuvarlak</option>
+      <option value="bevel">Kırık Kenar</option>
+      <option value="miter">Keskin Köşe</option>
+    </select>
+  </label>
+  <label>Merkezde Boş Alan (nxn): <input type="number" id="centralBlockSize" min="0" max="50" value="5"></label>
+  <label>QR Link: <input type="text" id="qrLink" placeholder="https://example.com"></label>
+  <label><input type="checkbox" id="showStartFinish"> Start/Finish Yazılarını Göster</label><br>
+  <button onclick="generateMaze()">Labirenti Oluştur</button>
+  <button onclick="solveMaze()">Çözümü Göster</button>
+
+  <canvas id="mazeCanvas" width="600" height="600"></canvas>
+  <div id="qr"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+  <script>
+    const canvas = document.getElementById('mazeCanvas');
+    const ctx = canvas.getContext('2d');
+    let maze, width, height, cellSize, wallThickness = 2;
+    let centralArea = { size: 0, startX: 0, startY: 0, endX: 0, endY: 0 };
+
+    function generateMaze() {
+      width = parseInt(document.getElementById('width').value);
+      height = parseInt(document.getElementById('height').value);
+      const difficulty = document.getElementById('difficulty').value;
+      wallThickness = parseInt(document.getElementById('wallThickness').value);
+      const lineJoin = document.getElementById('lineJoin').value;
+      const centerSize = parseInt(document.getElementById('centralBlockSize').value);
+      const qrLink = document.getElementById('qrLink').value;
+
+      centralArea.size = centerSize;
+      centralArea.startX = Math.floor((width - centerSize) / 2);
+      centralArea.startY = Math.floor((height - centerSize) / 2);
+      centralArea.endX = centralArea.startX + centerSize - 1;
+      centralArea.endY = centralArea.startY + centerSize - 1;
+
+      cellSize = Math.min(canvas.width / width, canvas.height / height);
+      ctx.lineWidth = wallThickness;
+      ctx.lineJoin = lineJoin;
+      ctx.lineCap = 'round';
+
+      maze = createMaze(width, height, difficulty);
+      drawMaze(maze);
+
+      // QR kodu oluştur
+      if (qrLink) {
+        const qrCanvas = document.createElement('canvas');
+        QRCode.toCanvas(qrCanvas, qrLink, { width: cellSize * centralArea.size, margin: 0 }, function (error) {
+          if (!error) {
+            const px = centralArea.startX * cellSize;
+            const py = centralArea.startY * cellSize;
+            ctx.drawImage(qrCanvas, px, py);
+          }
+        });
+      }
+
+      // Start/Finish yazıları
+      if (document.getElementById('showStartFinish').checked) {
+        ctx.fillStyle = 'green';
+        ctx.font = `${Math.floor(cellSize * 0.5)}px Arial`;
+        ctx.fillText('Start', cellSize * 0.2, cellSize * 0.8);
+        ctx.fillStyle = 'red';
+        ctx.fillText('Finish', canvas.width - cellSize * 2, canvas.height - cellSize * 0.2);
+      }
+    }
+
+    function inCentralArea(x, y) {
+      return (
+        x >= centralArea.startX && x <= centralArea.endX &&
+        y >= centralArea.startY && y <= centralArea.endY
+      );
+    }
+
+    function createMaze(w, h, difficulty) {
+      const maze = Array.from({ length: h }, (_, y) =>
+        Array.from({ length: w }, (_, x) => ({
+          top: true, right: true, bottom: true, left: true, visited: inCentralArea(x, y)
+        }))
+      );
+
+      const complexityFactor = {
+        easy: 0.4,
+        medium: 0.7,
+        hard: 1.0
+      }[difficulty];
+
+      function shuffle(array) {
+        for (let i = array.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [array[i], array[j]] = [array[j], array[i]];
+        }
+        return array;
+      }
+
+      function carve(x, y) {
+        maze[y][x].visited = true;
+        const dirs = shuffle(['top', 'right', 'bottom', 'left']);
+        for (const dir of dirs) {
+          const dx = { left: -1, right: 1, top: 0, bottom: 0 }[dir];
+          const dy = { top: -1, bottom: 1, left: 0, right: 0 }[dir];
+          const nx = x + dx, ny = y + dy;
+          if (nx >= 0 && ny >= 0 && nx < w && ny < h &&
+              !maze[ny][nx].visited &&
+              !inCentralArea(nx, ny) &&
+              Math.random() < complexityFactor) {
+            maze[y][x][dir] = false;
+            const opposite = { top: 'bottom', bottom: 'top', left: 'right', right: 'left' }[dir];
+            maze[ny][nx][opposite] = false;
+            carve(nx, ny);
+          }
+        }
+      }
+
+      carve(0, 0);
+      maze[0][0].left = false;
+      maze[h - 1][w - 1].right = false;
+      return maze;
+    }
+
+    function drawMaze(maze) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = 'black';
+
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          if (inCentralArea(x, y)) {
+            ctx.fillStyle = "#ddd";
+            ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+            continue;
+          }
+
+          const cell = maze[y][x];
+          const px = x * cellSize;
+          const py = y * cellSize;
+
+          if (cell.top) {
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(px + cellSize, py);
+            ctx.stroke();
+          }
+          if (cell.right) {
+            ctx.beginPath();
+            ctx.moveTo(px + cellSize, py);
+            ctx.lineTo(px + cellSize, py + cellSize);
+            ctx.stroke();
+          }
+          if (cell.bottom) {
+            ctx.beginPath();
+            ctx.moveTo(px, py + cellSize);
+            ctx.lineTo(px + cellSize, py + cellSize);
+            ctx.stroke();
+          }
+          if (cell.left) {
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(px, py + cellSize);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    function solveMaze() {
+      const visited = Array.from({ length: height }, () =>
+        Array(width).fill(false)
+      );
+      const path = [];
+      let found = false;
+
+      function dfs(x, y) {
+        if (x < 0 || y < 0 || x >= width || y >= height || visited[y][x] || inCentralArea(x, y))
+          return false;
+        visited[y][x] = true;
+        path.push([x, y]);
+        if (x === width - 1 && y === height - 1) {
+          found = true;
+          return true;
+        }
+        const cell = maze[y][x];
+        if (!cell.right && dfs(x + 1, y)) return true;
+        if (!cell.bottom && dfs(x, y + 1)) return true;
+        if (!cell.left && dfs(x - 1, y)) return true;
+        if (!cell.top && dfs(x, y - 1)) return true;
+        path.pop();
+        return false;
+      }
+
+      dfs(0, 0);
+      if (found) drawSolution(path);
+    }
+
+    function drawSolution(path) {
+      ctx.strokeStyle = 'green';
+      ctx.lineWidth = wallThickness / 2;
+      ctx.beginPath();
+      for (let i = 0; i < path.length; i++) {
+        const [x, y] = path[i];
+        const cx = x * cellSize + cellSize / 2;
+        const cy = y * cellSize + cellSize / 2;
+        if (i === 0) ctx.moveTo(cx, cy);
+        else ctx.lineTo(cx, cy);
+      }
+      ctx.stroke();
+    }
+
+    generateMaze(); // sayfa açıldığında otomatik başlat
+  </script>
+
+</body>
+</html>
